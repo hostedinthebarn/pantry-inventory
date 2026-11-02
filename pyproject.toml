@@ -1,0 +1,13 @@
+[project]
+name = "pantry-inventory-dev"
+version = "0.0.0"
+requires-python = ">=3.13,<3.14"
+dependencies = []
+
+[dependency-groups]
+dev = ["pytest-homeassistant-custom-component", "home-assistant-frontend"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests/integration"]
+pythonpath = ["."]
