@@ -86,6 +86,19 @@ _mod("homeassistant.helpers.event",
      async_track_time_change=lambda *a, **k: (lambda: None))
 _mod("homeassistant.helpers.entity_platform", AddEntitiesCallback=object)
 
+
+class _EntityRegistry:
+    """Just enough for delete_product's entity cleanup (added to the code 2026-09-13)."""
+    def __init__(self): self.removed = []
+    def async_get_entity_id(self, domain, platform, unique_id): return None
+    def async_get(self, entity_id): return None
+    def async_remove(self, entity_id): self.removed.append(entity_id)
+
+
+_ENTITY_REGISTRY = _EntityRegistry()
+_helpers.entity_registry = _mod("homeassistant.helpers.entity_registry",
+                                async_get=lambda hass: _ENTITY_REGISTRY)
+
 _util = _mod("homeassistant.util")
 # A MONOTONIC clock. A fixed one is what exposed the uuid4-vs-ULID ordering bug:
 # same-timestamp events fell back to a random tiebreak, and because a checkpoint
@@ -206,7 +219,9 @@ def test_rate():
     chk("7 scans in one day -> STILL estimate", r["rate_source"], "estimated")
     r = derive.rate([ev(i, "use_up", 2, days_ago=i) for i in range(1, 11)], P, NOW)
     chk("10 scans over 10 days -> measured", r["rate_source"], "measured")
-    chk("  rate is units/window", round(r["rate"], 4), round(20 / 21, 4))
+    # Units over the days the log covers (10), not the full 21-day window: the
+    # divisor change of 2026-09-13 (Premier caramel read at half speed).
+    chk("  rate is units/days covered", round(r["rate"], 4), round(20 / 10, 4))
     chk("  sample size exposed", r["rate_sample_size"], 10)
     r = derive.rate([ev(i, "use_up", 1, days_ago=30 + i) for i in range(1, 11)], P, NOW)
     chk("outside the window -> estimate, n=0",
