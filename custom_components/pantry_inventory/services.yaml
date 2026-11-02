@@ -1,0 +1,188 @@
+scan:
+  name: Scan
+  description: >-
+    Record a scanned barcode. An unknown code creates a provisional product and
+    still counts the scan - a refusal mid-unload would simply lose the data.
+  fields:
+    code:
+      required: true
+      example: "036000291452"
+      selector:
+        text:
+    direction:
+      required: true
+      selector:
+        select:
+          options: [stock_in, use_up]
+    source:
+      selector:
+        text:
+
+set_count:
+  name: Set count
+  description: >-
+    Record an OBSERVED count. Stored absolute, never as a delta. Use reconcile
+    at a restock (it closes a compliance period); adjust for a mid-cycle fix.
+  fields:
+    product_id:
+      required: true
+      selector:
+        text:
+    units:
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 9999
+          mode: box
+    event_type:
+      selector:
+        select:
+          options: [adjust, reconcile]
+    source:
+      selector:
+        text:
+
+save_product:
+  name: Save product
+  description: Create or update a product. Naming a provisional one activates it.
+  fields:
+    product_id:
+      required: true
+      selector:
+        text:
+    name:
+      selector:
+        text:
+    unit_noun:
+      example: bottle
+      selector:
+        text:
+    initial_rate_estimate:
+      description: Units per day. The only rate ever stored; a measured rate replaces it in use.
+      selector:
+        number:
+          min: 0
+          max: 100
+          step: 0.05
+          mode: box
+    threshold_days:
+      description: >-
+        Warn below this many days of supply (default 10). Keep it comfortably BELOW the days
+        a normal restock provides, or the product is permanently flagged.
+      selector:
+        number:
+          min: 1
+          max: 365
+          mode: box
+    policy:
+      description: >-
+        rate (default) warns below threshold_days of supply. par warns when
+        fewer than threshold_units are on hand - for things like jam, where
+        there is no consumption rate worth measuring.
+      selector:
+        select:
+          options: [rate, par]
+    threshold_units:
+      description: >-
+        Par policy only. Warn when fewer than this many are on hand. Minimum 1 -
+        a par of zero would leave the product permanently below threshold.
+      selector:
+        number:
+          min: 1
+          max: 999
+          mode: box
+    purchase_quantity:
+      description: >-
+        How many to buy when it does go on the list - the quantity stamped on
+        the shopping list item. Different question from threshold_units: par
+        says how low before reordering, this says how many to put in the
+        trolley. Nothing reads it back, so it never affects a count.
+      selector:
+        number:
+          min: 1
+          max: 999
+          mode: box
+    department:
+      description: >-
+        Where this sits in the shop, as a quick_shopping_list department slug.
+        Stamped onto the shopping list item when the product is pushed, and
+        re-stamped onto any active item when it changes here. A department is a
+        PLACE, not a food category - jam is bread_spreads, not condiments_sauces.
+      example: bread_spreads
+      selector:
+        select:
+          options: [produce, bakery, bread_spreads, deli, meat_seafood,
+                    dairy_eggs, breakfast_cereal, coffee_tea, canned_dry,
+                    condiments_sauces, baking_spices, snacks, beverages,
+                    alcohol, frozen, household_paper, health_beauty, pet,
+                    tools_hardware, lumber_building, paint_sundries, electrical,
+                    plumbing, garden_outdoor, automotive, office_stationery,
+                    other]
+    default_store:
+      selector:
+        select:
+          options: [All, DIY, Lowes, Costco, Walmart]
+    status:
+      selector:
+        select:
+          options: [active, provisional, archived]
+
+attach_barcode:
+  name: Attach barcode
+  description: >-
+    Point a barcode at a product, with the number of units THAT code represents
+    (a case code might be 18, a single bottle 1).
+  fields:
+    code:
+      required: true
+      selector:
+        text:
+    product_id:
+      required: true
+      selector:
+        text:
+    units:
+      selector:
+        number:
+          min: 1
+          max: 999
+          mode: box
+
+list_products:
+  name: List products
+  description: Every product with its derived state, plus the summary.
+
+evaluate:
+  name: Evaluate thresholds
+  description: Re-check every product and push anything below threshold to the shopping list.
+
+discard_provisional:
+  name: Discard provisional product
+  description: >-
+    Throw away a product that was auto-created by an unknown scan and never
+    named. Its barcodes and events go with it - there is nothing worth keeping
+    behind a code with no name. Refuses anything that is not provisional.
+  fields:
+    product_id:
+      required: true
+      selector:
+        text:
+
+delete_product:
+  name: Delete archived product
+  description: >-
+    Permanently delete an ARCHIVED product and its stock events. Its BARCODES
+    survive as remembered codes, so re-buying the product offers to recreate it
+    rather than starting from an empty form. Requires the exact product name as
+    confirmation - deliberately not easy, and deliberately not on the panel.
+  fields:
+    product_id:
+      required: true
+      selector:
+        text:
+    confirm_name:
+      required: true
+      description: The product's exact name. Anything else is refused.
+      selector:
+        text:
