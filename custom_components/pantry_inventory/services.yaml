@@ -120,9 +120,11 @@ save_product:
                     plumbing, garden_outdoor, automotive, office_stationery,
                     other]
     default_store:
+      description: >-
+        One of the store names set in the integration's options (Settings,
+        Devices & services, Pantry Inventory, Configure). Empty for none.
       selector:
-        select:
-          options: [All, DIY, Lowes, Costco, Walmart]
+        text:
     status:
       selector:
         select:

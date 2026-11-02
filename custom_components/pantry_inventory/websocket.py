@@ -15,6 +15,7 @@ import voluptuous as vol
 from homeassistant.components import websocket_api
 from homeassistant.components.websocket_api import connection
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import config_validation as cv
 
 from .const import (
     DEPARTMENT_SLUGS,
@@ -25,7 +26,6 @@ from .const import (
     EVENT_USE_UP,
     POLICIES,
     PRODUCT_STATUSES,
-    STORE_OPTIONS,
 )
 from .coordinator import PantryError, PantryManager
 
@@ -88,7 +88,7 @@ async def ws_set_count(hass, conn, msg):
     vol.Optional("threshold_units"): vol.Coerce(int),
     vol.Optional("purchase_quantity"): vol.Coerce(int),
     vol.Optional("department"): vol.In(list(DEPARTMENT_SLUGS) + [""]),
-    vol.Optional("default_store"): vol.In(list(STORE_OPTIONS) + [""]),
+    vol.Optional("default_store"): cv.string,  # checked against the configured stores by the coordinator
     vol.Optional("status"): vol.In(PRODUCT_STATUSES),
 })
 @websocket_api.async_response
@@ -154,7 +154,7 @@ def ws_dashboard(hass, conn, msg):
     conn.send_result(msg["id"], {
         "products": [m.state_for(p.product_id) for p in m.get_products()],
         "summary": m.summary(),
-        "store_options": list(STORE_OPTIONS),
+        "store_options": list(m.store_options),
     })
 
 

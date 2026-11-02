@@ -2,7 +2,7 @@
   "domain": "pantry_inventory",
   "name": "Pantry Inventory",
   "version": "0.1.0",
-  "documentation": "https://github.com/bulldoguk/claude-brain",
+  "documentation": "https://github.com/hostedinthebarn/pantry-inventory",
   "after_dependencies": [
     "frontend"
   ],

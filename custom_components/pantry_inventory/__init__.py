@@ -26,7 +26,6 @@ from .const import (
     PRODUCT_STATUSES,
     RECOMPUTE_HOUR,
     RECOMPUTE_MINUTE,
-    STORE_OPTIONS,
 )
 from .coordinator import PantryError, PantryManager
 from .panel import async_register_panel, async_remove_panel
@@ -57,11 +56,18 @@ def _as_service_error(func):
     return wrapper
 
 
+async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    await hass.config_entries.async_reload(entry.entry_id)
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     store = PantryStore(hass)
     await store.async_load()
     manager = PantryManager(hass, store)
+    manager.configure(dict(getattr(entry, "options", None) or {}))
     entry.runtime_data = manager
+    # Changing the shopping list or the stores in the options flow reloads the entry.
+    entry.async_on_unload(entry.add_update_listener(_async_options_updated))
     hass.data.setdefault(DOMAIN, {})["manager"] = manager
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -144,7 +150,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             vol.Optional("threshold_units"): vol.Coerce(int),
             vol.Optional("purchase_quantity"): vol.Coerce(int),
             vol.Optional("department"): vol.In(list(DEPARTMENT_SLUGS) + [""]),
-            vol.Optional("default_store"): vol.In(list(STORE_OPTIONS) + [""]),
+            vol.Optional("default_store"): cv.string,  # checked against the configured stores by the coordinator
             vol.Optional("status"): vol.In(PRODUCT_STATUSES),
         }),
         supports_response=SupportsResponse.OPTIONAL)

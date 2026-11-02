@@ -49,7 +49,7 @@ REASON_AWAITING_FIRST = "awaiting_first_measurement"
 # onto the shopping list before a single count has been entered.
 REASON_NO_EVENTS = "no_stock_events"
 
-# 10 days (Gary, 2026-09-02), measured in SHOPPING OPPORTUNITIES rather than
+# 10 days (decided 2026-09-02), measured in SHOPPING OPPORTUNITIES rather than
 # consumption: 10 days means that if something runs out mid-week there are still
 # two weekends available to replace it, and worst case one. That is the real
 # constraint - not the Costco cycle length.
@@ -99,7 +99,7 @@ DEFAULT_THRESHOLD_UNITS = 1
 # last box is opened, and 2 is a pair because that is what fills the cereal
 # container. Conflating them breaks in both directions - a par of 4 would flag
 # with three boxes still on the shelf, and a purchase quantity of 1 would keep
-# sending Gary back for the second box.
+# sending someone back for the second box.
 #
 # It is a hint stamped on the shopping list item and NOTHING else: stock is
 # scanned in per unit regardless, so inventory arithmetic never reads it. That
@@ -107,7 +107,7 @@ DEFAULT_THRESHOLD_UNITS = 1
 DEFAULT_PURCHASE_QUANTITY = 1
 
 # A use_up scan against a product with NO stock events writes this as an
-# `adjust` checkpoint first (Gary, 2026-09-04): there must have been at least
+# `adjust` checkpoint first (decided 2026-09-04): there must have been at least
 # one on the shelf for the barcode to be scannable, so the floor is 1 and
 # anything above it is a manual count. Without it the first scan of a new
 # product lands on-hand at -1 and the card reads "needs a count" on day one.
@@ -123,13 +123,19 @@ SEED_UNITS = 1
 # changes no arithmetic - it is forensics.
 SOURCE_SEED = "seed"
 
-# MIRRORS quick_shopping_list/const.py:33 - keep in sync by hand. A cross-component
-# import would couple two custom components at load time, which HA handles badly;
-# free text would let an item land on no list at all and be invisible while
-# appearing to have worked (ADR 0018).
+# The store names a product's default_store may take, when the config entry sets
+# none: the original install's list (ours). Stores are an options-flow setting
+# since 2026-11 (CONF_STORES), with an empty default for new installs, so nobody
+# else inherits our shops. Free text is still refused, because an unrecognised
+# store lands the item on no store's list while appearing to have worked.
 STORE_OPTIONS = ("All", "DIY", "Lowes", "Costco", "Walmart", "HEB")
 
 SHOPPING_LIST_DOMAIN = "quick_shopping_list"
+
+# Config entry options (2026-11, SW-82). CONF_SHOPPING_LIST is "quick_shopping_list"
+# or a todo.* entity id; CONF_STORES is a list of store names.
+CONF_SHOPPING_LIST = "shopping_list"
+CONF_STORES = "stores"
 
 # MIRRORS quick_shopping_list/const.py DEPARTMENTS - keep in sync by hand, for
 # the same reason as STORE_OPTIONS above: a cross-component import couples two

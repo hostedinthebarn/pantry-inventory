@@ -1,0 +1,43 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Pantry Inventory",
+        "description": "Choose the shopping list that running-low products are added to, and the stores you shop at (optional).",
+        "data": {
+          "shopping_list": "Shopping list",
+          "stores": "Stores"
+        },
+        "data_description": {
+          "shopping_list": "Any to-do list, such as Home Assistant's Shopping List, Local To-do or Bring!.",
+          "stores": "Names you can give a product as its usual store, such as Costco. Leave empty if you don't need them."
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "Pantry Inventory is already set up.",
+      "no_lists": "No to-do list found. Add one first (for example the Shopping List integration), then set up Pantry Inventory."
+    },
+    "error": {
+      "unknown_list": "That list isn't available."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Pantry Inventory options",
+        "data": {
+          "shopping_list": "Shopping list",
+          "stores": "Stores"
+        },
+        "data_description": {
+          "shopping_list": "Where products are added when they run low. Changing it doesn't move items already on the old list.",
+          "stores": "Names you can give a product as its usual store."
+        }
+      }
+    },
+    "error": {
+      "unknown_list": "That list isn't available."
+    }
+  }
+}

@@ -65,7 +65,11 @@ class ConfigFlow:
     def async_create_entry(self, **k): return k
 
 
-_mod("homeassistant.config_entries", ConfigEntry=ConfigEntry, ConfigFlow=ConfigFlow)
+class OptionsFlow: pass
+
+
+_mod("homeassistant.config_entries", ConfigEntry=ConfigEntry, ConfigFlow=ConfigFlow,
+     OptionsFlow=OptionsFlow)
 _mod("homeassistant.const", Platform=type("P", (), {"SENSOR": "sensor"}))
 _mod("homeassistant.exceptions", ServiceValidationError=Exception,
      HomeAssistantError=Exception)
@@ -80,6 +84,11 @@ class Store:
 
 
 _helpers.storage = _mod("homeassistant.helpers.storage", Store=Store)
+_helpers.selector = _mod(
+    "homeassistant.helpers.selector",
+    SelectSelector=lambda c: ("select", c), SelectSelectorConfig=lambda **k: k,
+    SelectSelectorMode=type("M", (), {"DROPDOWN": "dropdown"}),
+    TextSelector=lambda c: ("text", c), TextSelectorConfig=lambda **k: k)
 _helpers.config_validation = _mod("homeassistant.helpers.config_validation",
                                   string=str, boolean=bool)
 _mod("homeassistant.helpers.event",
@@ -330,7 +339,8 @@ def _test_vocabulary_mirror():
     here = os.path.dirname(os.path.abspath(__file__))
     sibling = os.path.join(here, "quick_shopping_list", "const.py")
     if not os.path.exists(sibling):
-        sibling = "/config/custom_components/quick_shopping_list/const.py"
+        import os
+        sibling = os.environ.get("QSL_CONST", "/config/custom_components/quick_shopping_list/const.py")
     if not os.path.exists(sibling):
         print("  SKIP vocabulary mirror - quick_shopping_list/const.py not found")
         return
@@ -390,7 +400,7 @@ async def test_coordinator():
     r = await m.async_scan(OTHER, "use_up")
     chk("unknown code -> provisional", r["provisional"], True)
     # WAS -1. A first use_up now seeds an observed floor of 1 first: there must
-    # have been one on the shelf for the code to be scannable (Gary, 2026-09-04).
+    # have been one on the shelf for the code to be scannable (decided 2026-09-04).
     chk("unknown scan is NOT lost", r["state"]["on_hand"], 0)
     seeded = [e for e in st.events_for(r["product_id"]) if e.source == "seed"]
     chk("  seeded once, as an observed checkpoint", len(seeded), 1)
@@ -799,7 +809,10 @@ class _H2:
 
 class _E:
     runtime_data = None
+    options: dict = {}
+    entry_id = "e1"
     def async_on_unload(self, f): pass
+    def add_update_listener(self, f): return lambda: None
 
 
 async def test_purchase_quantity():
@@ -878,6 +891,167 @@ async def test_setup():
          "ws_attach_to_existing"} <= set(REGISTERED), True)
 
 
+# --------------------------------------------------------------------------
+# SW-82 (2026-11): any HA to-do list, and stores as a setting
+# --------------------------------------------------------------------------
+class _TodoState:
+    def __init__(self, features): self.attributes = {"supported_features": features}
+
+
+class _TodoHass:
+    """A to-do list entity's services, the way HA's todo domain answers them."""
+    def __init__(self, entity="todo.shopping_list", features=1 | 2 | 4 | 64):
+        self.entity, self.items, self.calls = entity, [], []
+        self._features, self.fail_add = features, False
+        self.services, self.states = self, self
+    def get(self, entity_id):
+        return _TodoState(self._features) if entity_id == self.entity else None
+    async def async_call(self, domain, service, data, blocking=False, return_response=False):
+        self.calls.append((domain, service, dict(data)))
+        assert domain == "todo" and data["entity_id"] == self.entity, (domain, data)
+        if service == "get_items":
+            want = set(data.get("status") or ["needs_action", "completed"])
+            return {self.entity: {"items": [dict(i) for i in self.items if i["status"] in want]}}
+        if service == "add_item":
+            if self.fail_add:
+                raise RuntimeError("to-do list unavailable")
+            if "description" in data and not self._features & 64:
+                raise RuntimeError("description not supported")
+            self.items.append({"uid": f"u{len(self.items)}", "summary": data["item"],
+                               "status": "needs_action",
+                               "description": data.get("description")})
+        if service == "update_item":
+            for it in self.items:
+                if it["uid"] == data["item"]:
+                    if "rename" in data: it["summary"] = data["rename"]
+                    if "status" in data: it["status"] = data["status"]
+        return None
+
+
+def _todo_manager(hass):
+    st = PantryStore(hass)
+    st.products, st.barcodes, st.events = {}, {}, []
+    m = PantryManager(hass, st)
+    m.ensure_entity = lambda pid: None
+    m._write_state = lambda pid: None
+    m.configure({const.CONF_SHOPPING_LIST: hass.entity, const.CONF_STORES: ["Costco", "Aldi"]})
+    return m, st
+
+
+async def test_todo_list_backend():
+    from pantry_inventory.shopping_list import TodoListBackend, QuickShoppingListBackend
+    hass = _TodoHass()
+    m, st = _todo_manager(hass)
+    chk("a todo.* option picks the to-do backend", type(m.list_backend), TodoListBackend)
+    chk("  and the configured stores replace the original ones", m.store_options, ("Costco", "Aldi"))
+
+    await m.async_save_product({"product_id": "bran", "name": "Raisin Bran", "unit_noun": "box",
+                                "default_store": "Aldi", "policy": "par", "threshold_units": 2,
+                                "purchase_quantity": 2})
+    await m.async_set_count("bran", 2)
+    chk("at par adds nothing", [c for c in hass.calls if c[1] == "add_item"], [])
+    await m.async_set_count("bran", 1)
+    adds = [c for c in hass.calls if c[1] == "add_item"]
+    chk("below par adds one to-do item", len(adds), 1)
+    chk("  quantity goes in the text, since a to-do list has no quantity", adds[0][2]["item"], "Raisin Bran ×2")
+    chk("  store and product marker in the description",
+        adds[0][2].get("description"), "Store: Aldi\n[pantry:bran]")
+    chk("  the pantry remembers which item is this product's", st.list_links, {"bran": "u0"})
+    chk("  and keeps that link in its store", (st._store.data or {}).get("list_links"), {"bran": "u0"})
+
+    await m.async_set_count("bran", 0)
+    chk("scanning the rest out adds nothing further", len([c for c in hass.calls if c[1] == "add_item"]), 1)
+
+    await m.async_save_product({"product_id": "bran", "purchase_quantity": 3})
+    chk("a changed quantity renames the active item", hass.items[0]["summary"], "Raisin Bran ×3")
+    n = len(hass.calls)
+    await m.async_save_product({"product_id": "bran", "unit_noun": "carton"})
+    chk("  an unrelated change touches nothing", [c[1] for c in hass.calls[n:] if c[1] == "update_item"], [])
+
+    await m.async_attach_barcode(mk("0001234500001"), "bran", 1)
+    await m.async_scan(mk("0001234500001"), "stock_in")
+    chk("scanning one in ticks the item off", hass.items[0]["status"], "completed")
+    chk("  and forgets the link", st.list_links, {})
+
+    # a list that can't hold descriptions still works: the stored link is enough
+    hass2 = _TodoHass(features=1 | 2 | 4)
+    m2, st2 = _todo_manager(hass2)
+    await m2.async_save_product({"product_id": "jam", "name": "Jam", "policy": "par",
+                                 "threshold_units": 1})
+    await m2.async_set_count("jam", 0)
+    add = [c for c in hass2.calls if c[1] == "add_item"][0][2]
+    chk("no description is sent to a list without them", "description" in add, False)
+    chk("  the link is still kept", st2.list_links, {"jam": "u0"})
+
+    # a failed add must leave the push armed, the same rule as before (#0315)
+    hass3 = _TodoHass(); hass3.fail_add = True
+    m3, st3 = _todo_manager(hass3)
+    await m3.async_save_product({"product_id": "oil", "name": "Oil", "policy": "par",
+                                 "threshold_units": 1})
+    await m3.async_set_count("oil", 0)
+    chk("a failed add leaves the push armed", st3.products["oil"].push_armed, True)
+    chk("  and links nothing", st3.list_links, {})
+
+    # two products with the same name never share an item
+    hass4 = _TodoHass()
+    m4, st4 = _todo_manager(hass4)
+    for pid in ("milk-a", "milk-b"):
+        await m4.async_save_product({"product_id": pid, "name": "Milk", "policy": "par",
+                                     "threshold_units": 1})
+        await m4.async_set_count(pid, 0)
+    chk("same-named products get their own items", sorted(st4.list_links.values()), ["u0", "u1"])
+
+
+async def test_store_and_list_settings():
+    from pantry_inventory.shopping_list import QuickShoppingListBackend
+    st = PantryStore(_Hass())
+    st.products, st.barcodes, st.events = {}, {}, []
+    m = PantryManager(_Hass(), st)
+    m.ensure_entity = lambda pid: None
+    m._write_state = lambda pid: None
+    m.configure({})
+    chk("no options (an install from before) keeps quick_shopping_list",
+        type(m.list_backend), QuickShoppingListBackend)
+    chk("  and the original stores", m.store_options, const.STORE_OPTIONS)
+    m.configure({const.CONF_SHOPPING_LIST: "quick_shopping_list", const.CONF_STORES: []})
+    chk("a new install starts with no stores", m.store_options, ())
+    try:
+        await m.async_save_product({"product_id": "x", "name": "X", "default_store": "Costco"})
+        chk("a store that isn't configured is refused", False, True)
+    except PantryError:
+        chk("a store that isn't configured is refused", True, True)
+    chk("  and leaves nothing behind", "x" in st.products, False)
+    await m.async_save_product({"product_id": "x", "name": "X", "default_store": ""})
+    chk("no store is always allowed", st.products["x"].default_store, "")
+
+
+async def test_link_storage_round_trip():
+    hass = _Hass()
+    st = PantryStore(hass)
+    held = st.list_links
+    st.list_links["p"] = "u9"
+    await st.async_save()
+    st2 = PantryStore(hass); st2._store.data = st._store.data
+    await st2.async_load()
+    chk("links survive a reload", st2.list_links, {"p": "u9"})
+    st._store.data = {"products": [], "barcodes": [], "events": []}
+    await st.async_load()
+    chk("a store from before links loads with none", st.list_links, {})
+    chk("  in place, so a to-do backend keeps the same dict", st.list_links is held, True)
+
+
+def test_config_flow_helpers():
+    from pantry_inventory import config_flow as cf
+    chk("stores: trimmed, blanks and repeats dropped, order kept",
+        cf.clean_stores([" Costco", "", "Aldi", "Costco "]), ["Costco", "Aldi"])
+    chk("stores typed as one line split on commas", cf.clean_stores("HEB, Walmart"), ["HEB", "Walmart"])
+    chk("quick_shopping_list preferred where installed",
+        cf.default_list(["quick_shopping_list", "todo.a", "todo.shopping_list"]), "quick_shopping_list")
+    chk("else HA's own Shopping List", cf.default_list(["todo.a", "todo.shopping_list"]), "todo.shopping_list")
+    chk("else the first list", cf.default_list(["todo.a"]), "todo.a")
+    chk("no lists, no default", cf.default_list([]), None)
+
+
 def main():
     test_gtin(); test_ulid(); test_on_hand(); test_rate()
     test_days_of_supply(); test_compliance(); test_models(); _test_par_models()
@@ -885,6 +1059,10 @@ def main():
     asyncio.run(test_coordinator())
     asyncio.run(test_purchase_quantity())
     asyncio.run(test_setup())
+    asyncio.run(test_todo_list_backend())
+    asyncio.run(test_store_and_list_settings())
+    asyncio.run(test_link_storage_round_trip())
+    test_config_flow_helpers()
     print(f"\n{OK} passed, {FAIL} failed")
     return 1 if FAIL else 0
 

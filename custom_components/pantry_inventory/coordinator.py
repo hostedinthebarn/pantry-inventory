@@ -25,6 +25,8 @@ from .const import (
     PRODUCT_ARCHIVED,
     PRODUCT_PROVISIONAL,
     SEED_UNITS,
+    CONF_SHOPPING_LIST,
+    CONF_STORES,
     SHOPPING_LIST_DOMAIN,
     SOURCE_SEED,
     SOURCE_TAG,
@@ -32,6 +34,7 @@ from .const import (
 )
 from .models import BarcodeRecord, ProductRecord, StockEventRecord
 from .storage import PantryStore
+from .shopping_list import QuickShoppingListBackend, TodoListBackend
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -50,6 +53,22 @@ class PantryManager:
         self.summary_entities: list[Any] = []
         self.add_sensor_entities = None
         self.sensor_factory = None   # set by sensor.py; avoids a circular import
+        # Where pushes go, and the store names a product may carry. An entry with
+        # no options (every install from before 2026-11) keeps quick_shopping_list
+        # and the original stores, so an upgrade changes nothing at home.
+        self.store_options: tuple[str, ...] = STORE_OPTIONS
+        self.list_backend = QuickShoppingListBackend(hass, self.store_options)
+
+    def configure(self, options: dict[str, Any]) -> None:
+        """Apply the config entry's options: the shopping list and the stores."""
+        stores = options.get(CONF_STORES)
+        self.store_options = tuple(stores) if stores is not None else STORE_OPTIONS
+        target = options.get(CONF_SHOPPING_LIST) or SHOPPING_LIST_DOMAIN
+        if target == SHOPPING_LIST_DOMAIN:
+            self.list_backend = QuickShoppingListBackend(self.hass, self.store_options)
+        else:
+            self.list_backend = TodoListBackend(self.hass, target, self.store.list_links,
+                                                self.store.async_save)
 
     # ---------- reads ----------
 
@@ -188,7 +207,7 @@ class PantryManager:
 
         # SEED. A use_up scan against a product with no stock events at all
         # means the very first thing that ever happened to it was someone taking
-        # one off the shelf - so there was at least one there (Gary, 2026-09-04).
+        # one off the shelf - so there was at least one there (decided 2026-09-04).
         # Recording that floor as an observed checkpoint is what stops the first
         # scan of a new product landing at -1 and reading "needs a count" on day
         # one, and it is what lets a par product push on its first use.
@@ -316,41 +335,16 @@ class PantryManager:
                 self._write_state(p.product_id)
 
     async def _push(self, p: ProductRecord) -> bool:
-        """Add to quick_shopping_list. True only on a confirmed add.
+        """Add to the shopping list. True only on a confirmed add.
 
         A failed call must leave push_armed set: disarming on failure loses the
         push permanently, since re-arming needs on-hand to increase - which will
         not happen while nobody knows they are out (#0315).
         """
         try:
-            for it in await self._list_items():
-                if it.get("product_id") == p.product_id and it.get("status") == "active":
-                    return True                # already there; treat as done
-            # The store IS tags[0] in quick_shopping_list, and choosing a store
-            # replaces the whole tag list - so this is the ONLY tag we write.
-            tags = ([p.default_store]
-                    if p.default_store in STORE_OPTIONS and p.default_store != "All"
-                    else [])
-            await self.hass.services.async_call(
-                SHOPPING_LIST_DOMAIN, "add_item",
-                # `store` is the field the list moved to in its storage minor 2;
-                # `tags` is sent alongside it for the dual-write window, so this
-                # call is correct against a list build from either side of that
-                # change and the two components need not be deployed together.
-                # `gtin` lets the list fetch an exact product picture instead
-                # of guessing one from the name. It is additive: a list build
-                # that predates it rejects unknown keys, so the two components
-                # still deploy independently in that direction only.
-                # Quantity is the product's, not a constant. It is only ever
-                # a hint for the trolley: nothing reads it back, and stock is
-                # scanned in per unit, so an item bought as a pair still lands
-                # in inventory as two separate stock_in scans.
-                {"name": p.name, "quantity": str(p.purchase_quantity),
-                 "source": SOURCE_TAG,
-                 "store": p.default_store, "tags": tags,
-                 "department": p.department, "product_id": p.product_id,
-                 "gtin": self._unit_barcode(p.product_id)},
-                blocking=True)
+            if await self.list_backend.has_active(p.product_id):
+                return True                # already there; treat as done
+            await self.list_backend.add(p, self._unit_barcode(p.product_id))
             return True
         except Exception as err:  # noqa: BLE001 - must not disarm on any failure
             _LOGGER.warning("pantry: shopping list push failed for %s: %s",
@@ -370,19 +364,9 @@ class PantryManager:
 
     async def _mark_purchased(self, product_id: str) -> None:
         try:
-            for it in await self._list_items():
-                if it.get("product_id") == product_id and it.get("status") == "active":
-                    await self.hass.services.async_call(
-                        SHOPPING_LIST_DOMAIN, "mark_purchased",
-                        {"item_id": it["item_id"]}, blocking=True)
+            await self.list_backend.mark_purchased(product_id)
         except Exception as err:  # noqa: BLE001
             _LOGGER.warning("pantry: mark_purchased failed for %s: %s", product_id, err)
-
-    async def _list_items(self) -> list[dict]:
-        resp = await self.hass.services.async_call(
-            SHOPPING_LIST_DOMAIN, "list_items", {}, blocking=True,
-            return_response=True)
-        return (resp or {}).get("items", [])
 
     # ---------- catalogue ----------
 
@@ -396,10 +380,10 @@ class PantryManager:
         # value stuck on the in-memory record, so every subsequent save of that
         # product failed too - a refusal must leave state exactly as it was.
         incoming_store = data.get("default_store")
-        if incoming_store is not None and incoming_store not in STORE_OPTIONS \
+        if incoming_store is not None and incoming_store not in self.store_options \
                 and incoming_store != "":
             raise PantryError(
-                f"default_store {incoming_store!r} is not one of {STORE_OPTIONS}. "
+                f"default_store {incoming_store!r} is not one of {self.store_options}. "
                 "An unrecognised tag lands the item on no list at all.")
         incoming_policy = data.get("policy")
         if incoming_policy is not None and incoming_policy not in POLICIES:
@@ -494,32 +478,9 @@ class PantryManager:
           disarming on failure.
         """
         try:
-            for it in await self._list_items():
-                if it.get("product_id") != p.product_id:
-                    continue
-                if it.get("status") != "active":
-                    continue
-                updates: dict[str, Any] = {}
-                if it.get("name") != p.name:
-                    updates["name"] = p.name
-                if p.department and it.get("department") != p.department:
-                    updates["department"] = p.department
-                # Same rule as the name: propagated at the moment you change
-                # it, not owned continuously. Deciding a product is bought in
-                # pairs is a deliberate act that reasonably means "including
-                # the one already on the list" - otherwise the setting does
-                # nothing until the current item is bought and re-pushed,
-                # which is exactly the cycle it exists to fix.
-                if it.get("quantity") != str(p.purchase_quantity):
-                    updates["quantity"] = str(p.purchase_quantity)
-                if not updates:
-                    continue
-                await self.hass.services.async_call(
-                    SHOPPING_LIST_DOMAIN, "update_item",
-                    {"item_id": it["item_id"], **updates}, blocking=True)
+            for item_id, fields in await self.list_backend.restamp(p):
                 _LOGGER.info("pantry: re-stamped list item %s for %s (%s)",
-                             it["item_id"], p.product_id,
-                             ", ".join(sorted(updates)))
+                             item_id, p.product_id, ", ".join(fields))
         except Exception as err:  # noqa: BLE001 - must not fail the save
             _LOGGER.warning("pantry: could not re-stamp list items for %s: %s",
                             p.product_id, err)
