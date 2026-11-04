@@ -15,6 +15,10 @@ point is to exercise OUR logic, not Home Assistant's.
 import asyncio
 import sys
 import types
+from pathlib import Path
+
+# Import the package from this repo's custom_components, wherever the suite is run from.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "custom_components"))
 from datetime import datetime, timedelta
 
 # --------------------------------------------------------------------------

@@ -14,3 +14,13 @@ if _OURS not in custom_components.__path__:
 @pytest.fixture(autouse=True)
 def auto_enable_custom_integrations(enable_custom_integrations):
     yield
+
+
+@pytest.fixture(autouse=True)
+def fresh_shopping_list(hass):
+    """The built-in Shopping List saves to the harness's shared testing_config
+    folder, so a previous run's items would leak into the next. Start empty."""
+    path = Path(hass.config.path(".shopping_list.json"))
+    path.unlink(missing_ok=True)
+    yield
+    path.unlink(missing_ok=True)
