@@ -45,6 +45,14 @@ A **Pantry** entry appears in the sidebar.
 - **Counting the cupboard:** if the numbers drift, type in the real count. That count replaces the old one rather than adding to it.
 - **Running low:** each product has a level at which it goes on the shopping list. Pantry Inventory checks after every change.
 
+## The one rule: scan it out
+
+Scan things **out** when you use them up, not just in when you buy them.
+
+Pantry Inventory never sees your cupboard; it only knows what you scan. Scanning in tells it what you bought. Scanning out is the only way it learns how fast you actually use each thing, and that rate is what decides when a product goes on the shopping list. Skip the scan-outs and it believes you still have plenty, so the item never makes the list and you run out.
+
+If you do forget for a while, type in the real count and carry on. A counted number always wins.
+
 ## For automations
 
 Everything the panel does is also available as an action (service) under `pantry_inventory`, so a dedicated barcode scanner or an automation can drive it:
@@ -69,6 +77,10 @@ Everything is stored in Home Assistant's own storage on your machine and include
 ## Development
 
 See [tests/README.md](tests/README.md) for running the two test suites.
+
+## Support
+
+Pantry Inventory is provided as-is, with no warranty and no promise of support. Bug reports and suggestions are welcome on the [issues page](https://github.com/hostedinthebarn/pantry-inventory/issues), and they're read, but there's no guaranteed response time.
 
 ## Licence
 
