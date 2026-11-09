@@ -19,7 +19,7 @@ jobs:
         run: python3 -I tests/test_pantry.py
       - name: Integration suite
         run: |
-          uv sync --python 3.13 --locked
+          uv sync --python 3.14 --locked
           .venv/bin/python -m pytest
 
   hassfest:
